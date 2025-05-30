@@ -1,0 +1,15 @@
+[Mod]
+game = 'KSP-1.12'
+name = 'TUFX'
+depends = ['ClickThroughBlocker', 'ToolbarController']
+tags = ['visual']
+
+[Download]
+filename = 'tufx'
+url = 'https://github.com/KSPModStewards/TUFX/releases/download/1.1.0/TUFX-1.1.0.zip'
+# zip (folder), file
+format = 'zip'
+hash-format = "sha256"
+# optional for zip format
+target = "GameData/TUFX"
+dest = 'GameData'
