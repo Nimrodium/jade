@@ -7,7 +7,7 @@ use std::{
 use serde_derive::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::store::StorePath;
+use crate::store::{self, Store, StorePath};
 #[derive(Deserialize)]
 pub struct RawDerivation {
     url: String,
@@ -19,17 +19,24 @@ pub struct RawDerivation {
     depends: Option<Vec<String>>,
     tags: Option<Vec<String>>,
 }
-
+fn is_false(b: &bool) -> bool {
+    !b
+}
 #[derive(Serialize, Clone, PartialEq, Eq, Hash)]
 pub struct Derivation {
     pub url: String,
-    pub extract: bool,
-    pub extract_target: Option<String>,
     pub name: String,
     pub file_name: String,
+    #[serde(skip_serializing_if = "is_false")]
+    pub extract: bool,
+    pub extract_target: Option<String>,
     pub hash: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub depends: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    #[serde(skip_serializing)]
+    pub backing_file: String,
 }
 
 impl Derivation {
@@ -41,10 +48,10 @@ impl Derivation {
             .map_err(|e| format!("failed to read derivation `{}`: {e}", path.display()))?;
         let raw_derivation: RawDerivation = toml::from_str(&contents)
             .map_err(|e| format!("failed to parse derivation `{}`: {e}", path.display()))?;
-        Ok(Self::from_raw(raw_derivation))
+        Ok(Self::from_raw(raw_derivation, &path.display().to_string()))
     }
 
-    fn from_raw(derivation: RawDerivation) -> Self {
+    fn from_raw(derivation: RawDerivation, p: &str) -> Self {
         let url_extracted_name = derivation
             .url
             .rsplit_once('/')
@@ -94,6 +101,7 @@ impl Derivation {
             } else {
                 vec![]
             },
+            backing_file: p.to_string(),
         }
     }
 
@@ -112,7 +120,8 @@ impl Derivation {
             .bytes()
             .map_err(|e| format!("failed to read downloaded data for {}: `{e}`", self.name))?;
         self.hash = Some(hash_stream(&bytes));
-        file.write_all(&bytes);
+        file.write_all(&bytes)
+            .map_err(|e| format!("failed to write to disk `{path}`: {e}"))?;
         Ok(path)
     }
 
@@ -132,11 +141,11 @@ impl Derivation {
         format!("{}-{}", self.hash.as_ref().unwrap(), self.name)
     }
 
-    pub fn install_to_store(&self, store: &str, cache_f: &str) -> Result<StorePath, String> {
-        let store_path = StorePath::new(&format!("{store}/{}/", self.generate_hash_signature()));
+    pub fn install_to_store(&self, store: &Store, cache_f: &str) -> Result<StorePath, String> {
+        let store_path = store.make_package_store_path(self);
         fs::create_dir_all(store_path.to_string())
             .map_err(|e| format!("failed to create store path `{store_path}`: {e}"))?;
-        println!("installing {} to store (`{store_path}`)", self.name);
+        println!("installing {} to store (`{}`)", self.name, store.store_path);
         let install_path = store_path.get_artifact();
         fs::rename(cache_f, install_path).map_err(|e| {
             format!(
@@ -147,12 +156,21 @@ impl Derivation {
         Ok(store_path)
     }
 
-    pub fn write_back(&self, path: &str) -> Result<(), String> {
+    pub fn write_back(&self) -> Result<(), String> {
         let serialized = toml::to_string(&self)
             .map_err(|e| format!("failed to serialize derivation for {}: {e}", self.name))?;
-        let mut file = File::open(path)
-            .map_err(|e| format!("failed to open derivation {path} for write-back: `{e}`"))?;
-        file.write_all(&serialized.as_bytes());
+        let mut file = File::create(&self.backing_file).map_err(|e| {
+            format!(
+                "failed to open derivation {} for write-back: `{e}`",
+                self.backing_file
+            )
+        })?;
+        file.write_all(&serialized.as_bytes()).map_err(|e| {
+            format!(
+                "failed to write back derivation file `{}`: {e}",
+                self.backing_file
+            )
+        })?;
         Ok(())
     }
 }
