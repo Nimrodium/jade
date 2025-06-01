@@ -28,7 +28,7 @@ fn filter_derivations_by_tags(
     new_derivations
 }
 
-fn dedup(derivations: Vec<Derivation>) -> Vec<Derivation> {
+pub fn dedup(derivations: Vec<Derivation>) -> Vec<Derivation> {
     let mut tmp = HashSet::<Derivation>::new();
     for derivation in derivations {
         tmp.insert(derivation);

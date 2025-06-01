@@ -58,7 +58,7 @@ impl Derivation {
             if let Some(file_name) = &derivation.file_name {
                 file_name.clone()
             } else {
-                url_extracted_name
+                url_extracted_name.clone()
             }
         };
 
@@ -74,7 +74,7 @@ impl Derivation {
                 if let Some(file_name) = derivation.file_name {
                     file_name.clone()
                 } else {
-                    name.clone()
+                    url_extracted_name
                 }
             },
             name,
@@ -101,6 +101,7 @@ impl Derivation {
     /// returns downloaded file path in cache
     pub fn download(&mut self, tmp: &str) -> Result<String, String> {
         let path = format!("{tmp}/{}", self.file_name);
+        println!("downloading {} to {path}", self.url);
         let mut file = fs::File::create(&path)
             .map_err(|e| format!("failed to create temporary file `{path}`: {e}"))?;
 
@@ -118,6 +119,7 @@ impl Derivation {
     pub fn extract_package(&self, cache_file_path: &str) -> Result<String, String> {
         // let file = File::open(cache_file_path).map_err(|e|format!("failed to open downloaded archive `{cache_file_path}`: {e}"))?;
         let dest = format!("{cache_file_path}.extracted");
+        println!("extracting {cache_file_path} to {dest}");
         zip_extensions::zip_extract(
             &Path::new(cache_file_path).to_path_buf(),
             &Path::new(&dest).to_path_buf(),
@@ -132,9 +134,16 @@ impl Derivation {
 
     pub fn install_to_store(&self, store: &str, cache_f: &str) -> Result<StorePath, String> {
         let store_path = StorePath::new(&format!("{store}/{}/", self.generate_hash_signature()));
+        fs::create_dir_all(store_path.to_string())
+            .map_err(|e| format!("failed to create store path `{store_path}`: {e}"))?;
+        println!("installing {} to store (`{store_path}`)", self.name);
         let install_path = store_path.get_artifact();
-        fs::rename(cache_f, install_path)
-            .map_err(|e| format!("failed to install `{}` to store: {e}", self.name))?;
+        fs::rename(cache_f, install_path).map_err(|e| {
+            format!(
+                "failed to install `{}`(`{cache_f}`) to store: {e}",
+                self.name
+            )
+        })?;
         Ok(store_path)
     }
 
@@ -165,7 +174,7 @@ fn hash_stream(byte_stream: &[u8]) -> String {
 // fn extract_zip(p: &str) -> Result<String, String> {}
 
 /// recursively load derivations
-fn load_derivations_from_directory(dir: &Path) -> Result<Vec<Derivation>, String> {
+pub fn load_derivations_from_directory(dir: &Path) -> Result<Vec<Derivation>, String> {
     let display_dir = dir.display();
     let mut derivations = Vec::<Derivation>::new();
     if !dir.is_dir() {
