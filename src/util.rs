@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use std::{fs, path::Path};
 
 use crate::package::Derivation;
@@ -34,4 +34,10 @@ pub fn backup_derives(pack_name: &str, pack_dir: &str, backup_dir: &str) -> Resu
     )
     .map_err(|e| format!("failed to backup pack `{pack_dir}` to `{backup_folder_name}`: {e:?}",))?;
     Ok(())
+}
+
+pub fn normalize(s: &str) -> String {
+    let mut n = s.to_ascii_lowercase();
+    n.retain(|c| c.is_ascii_alphanumeric());
+    n
 }

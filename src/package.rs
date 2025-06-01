@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -7,7 +8,10 @@ use std::{
 use serde_derive::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::store::{self, Store, StorePath};
+use crate::{
+    store::{self, Store, StorePath},
+    util::{self, normalize},
+};
 #[derive(Deserialize)]
 pub struct RawDerivation {
     url: String,
@@ -173,6 +177,9 @@ impl Derivation {
         })?;
         Ok(())
     }
+    fn normalize_name(&mut self) {
+        self.name = util::normalize(&self.name);
+    }
 }
 
 fn hash_file(f: &str) -> Result<String, String> {
@@ -213,3 +220,68 @@ pub fn load_derivations_from_directory(dir: &Path) -> Result<Vec<Derivation>, St
     }
     Ok(derivations)
 }
+
+pub struct Derivations {
+    pub derivations: Vec<Derivation>,
+}
+impl Derivations {
+    pub fn new(derivations: Vec<Derivation>) -> Self {
+        Self { derivations }
+    }
+    pub fn load_derivations_from_directory(dir_s: &str) -> Result<Self, String> {
+        let dir = Path::new(dir_s);
+        let display_dir = dir.display();
+        let mut derivations = Vec::<Derivation>::new();
+        if !dir.is_dir() {
+            return Err(format!("{display_dir} is not a directory"));
+        }
+        for result in dir
+            .read_dir()
+            .map_err(|e| format!("failed to read directory {display_dir}: {e}"))?
+        {
+            let entry =
+                result.map_err(|e| format!("failed to read directory {display_dir}: {e}"))?;
+            if entry.path().is_dir() {
+                // enter subdir
+                let sub_derivations = load_derivations_from_directory(&entry.path())?;
+                derivations.extend(sub_derivations);
+            } else if entry.path().is_file() {
+                derivations.push(Derivation::load(&entry.path())?);
+            }
+        }
+        Ok(Self::new(derivations))
+    }
+    pub fn dedup(&mut self) {
+        let mut tmp = HashSet::<Derivation>::new();
+        for derivation in std::mem::take(&mut self.derivations) {
+            tmp.insert(derivation);
+        }
+        self.derivations = tmp.into_iter().collect();
+    }
+    pub fn get_derivation_by_fuzzy_name(&self, name: &str) -> Result<&Derivation, String> {
+        let mut found_derivation = None;
+        let normalized_name = normalize(name);
+        for derivation in &self.derivations {
+            if util::normalize(&derivation.name).contains(&normalized_name) {
+                found_derivation = Some(derivation);
+                break;
+            }
+        }
+        if let Some(derivation) = found_derivation {
+            Ok(derivation)
+        } else {
+            return Err(format!("{name} could not be found"));
+        }
+    }
+}
+
+// impl IntoIterator for Derivations {
+//     type Item = Derivation;
+
+//     type IntoIter = std::vec::IntoIter<Derivation>;
+
+//     fn into_iter(self) -> Self::IntoIter {
+//         self.derivations.into_iter()
+//     }
+// }
+// fn get_derivation_by_fuzzy_name(name:&str,derivations:&Derivation)
