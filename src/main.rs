@@ -6,6 +6,8 @@ use std::{
     path::Path,
     process,
 };
+mod api;
+mod api_driver;
 mod util;
 use manifest::Manifest;
 use package::{Derivations, load_derivations_from_directory};
@@ -75,7 +77,9 @@ enum Commands {
         editor: Option<String>,
     },
     Check {},
-    Install {},
+    Install {
+        mods: Vec<String>,
+    },
     List {
         filter: Option<String>,
     },
@@ -105,25 +109,13 @@ fn get_jade_root() -> Result<String, String> {
     fs::create_dir_all(&root);
     Ok(root)
 }
-// fn get_temp()
-fn entry(args: Args) -> Result<(), String> {
-    let root = if let Some(root) = args.root {
-        root
-    } else {
-        get_jade_root()?
-    };
-    let store_path = if let Some(store) = args.store {
-        store
-    } else {
-        format!("{root}/store/")
-    };
 
-    let store = Store::new(&store_path, &format!("root/staging"));
-    let manifest = if let Some(manifest) = args.manifest {
+fn load_context(dir: &str, args: &Args) -> Result<(Manifest, String), String> {
+    let manifest = if let Some(manifest) = &args.manifest {
         Manifest::load(&manifest)?
     } else {
-        let manifest_path = format!("./{MANIFEST}");
-        if let Some(flag_manifest) = args.manifest {
+        let manifest_path = format!("{dir}/{MANIFEST}");
+        if let Some(flag_manifest) = &args.manifest {
             Manifest::load(&flag_manifest)?
         } else if Path::new(&manifest_path).exists() {
             Manifest::load(&manifest_path)?
@@ -134,20 +126,38 @@ fn entry(args: Args) -> Result<(), String> {
         }
     };
 
-    let derives = if let Some(derives) = args.derives {
-        derives
-    } else if let Some(derives) = manifest.derives {
-        derives
+    let fallback = format!("{dir}/derives/");
+    let derives = if let Some(derives) = &args.derives {
+        derives.clone()
+    } else if let Some(derives) = &manifest.main.derives {
+        derives.clone()
     } else if {
-        let derives_path = Path::new(DERIVES_FALLBACK);
+        let derives_path = Path::new(&fallback);
         derives_path.exists() && derives_path.is_dir()
     } {
-        DERIVES_FALLBACK.to_string()
+        fallback
     } else {
         return Err(format!(
             "could not find derives, either create the ./derives directory in your pack, set this in the project manfiest (derives = \"/path/to/derives\" or try passing the --derives flag to manually specify directory"
         ));
     };
+
+    Ok((manifest, derives))
+}
+// fn get_temp()
+fn entry(args: Args) -> Result<(), String> {
+    let root = if let Some(root) = &args.root {
+        root.to_string()
+    } else {
+        get_jade_root()?
+    };
+    let store_path = if let Some(store) = &args.store {
+        store.to_string()
+    } else {
+        format!("{root}/store/")
+    };
+
+    let store = Store::new(&store_path, &format!("root/staging"));
 
     let symlink = if args.symlink {
         true
@@ -163,23 +173,14 @@ fn entry(args: Args) -> Result<(), String> {
             true
         }
     };
-    // {
-    //     #[cfg(target_os = "windows")]
-    //     {
-    //         false
-    //     }
-    //     #[cfg(not(target_os = "windows"))]
-    //     {
-    //         true
-    //     }
-    // }
 
     match args.command {
         Commands::BootStrap { manifest } => todo!(),
-        Commands::Compose { target } => {
+        Commands::Compose { ref target } => {
+            let (manifest, derives) = load_context("./", &args)?;
             let target = if let Some(target) = target {
-                target
-            } else if let Some(target) = manifest.target {
+                target.to_string()
+            } else if let Some(target) = manifest.main.target {
                 target
             } else {
                 return Err(format!(
@@ -191,27 +192,23 @@ fn entry(args: Args) -> Result<(), String> {
             for path in paths {
                 path.install_to(&target, symlink)?;
             }
-            // let source = if let Some(source) = source {
-            //     target
-            // } else if let Some(source) = manifest.source {
-            //     source
-            // } else {
-            //     return Err(format!(
-            //         "no source specified, either add this to the pack manifest (target = \"/path/to/\") or manually specify with the --target flag"
-            //     ));
-            // };
         }
-        Commands::Edit { modname, editor } => {
-            let editor_print = if cfg!(windows) {
-                "%EDITOR%".to_string()
+        Commands::Edit {
+            ref modname,
+            ref editor,
+        } => {
+            let (manifest, derives) = load_context("./", &args)?;
+            let default_editor = if cfg!(windows) {
+                // "%EDITOR%".to_string()
+                "notepad".to_string()
             } else {
-                "$EDITOR".to_string()
+                "nano".to_string()
             };
             let editor = if let Some(editor) = editor {
-                editor
+                editor.to_string()
             } else {
-                env::var("EDITOR")
-                    .map_err(|e| format!("error could not access {editor_print}: {e}, either set this environment variable or try passing the --editor flag to manually specify editora"))?
+                env::var("EDITOR").unwrap_or(default_editor)
+                // .map_err(|e| format!("error could not access {editor_print}: {e}, either set this environment variable or try passing the --editor flag to manually specify editora"))?
             };
             let normalized_modname = util::normalize(&modname);
             let path = {
@@ -226,8 +223,25 @@ fn entry(args: Args) -> Result<(), String> {
             process::Command::new(editor).arg(&path).output();
         }
         Commands::Check {} => todo!(),
-        Commands::Install {} => todo!(),
-        Commands::List { filter } => {
+        Commands::Install { ref mods } => {
+            let (manifest, derives) = load_context("./", &args)?;
+            let api_name = if let Some(name) = manifest.main.api {
+                name
+            } else {
+                return Err(format!("no api driver specified"));
+            };
+
+            let mut driver = api::get_api_driver(&api_name, &manifest.api_cfg)?;
+            for pkg in mods {
+                let results = driver.search(pkg)?;
+                println!("search results:\n{results:#?}");
+                let derives = driver.get_derivations_for(&results[0].id)?;
+                println!("derived:\n{derives:#?}")
+            }
+        }
+
+        Commands::List { ref filter } => {
+            let (manifest, derives) = load_context("./", &args)?;
             let derivations = Derivations::load_derivations_from_directory(&derives)?;
             let name = if let Some(name) = filter {
                 Some(normalize(&name))

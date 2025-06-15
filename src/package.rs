@@ -22,11 +22,12 @@ pub struct RawDerivation {
     hash: Option<String>,
     depends: Option<Vec<String>>,
     tags: Option<Vec<String>>,
+    apipkgid: Option<String>,
 }
 fn is_false(b: &bool) -> bool {
     !b
 }
-#[derive(Serialize, Clone, PartialEq, Eq, Hash)]
+#[derive(Serialize, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Derivation {
     pub url: String,
     pub name: String,
@@ -41,9 +42,34 @@ pub struct Derivation {
     pub tags: Vec<String>,
     #[serde(skip_serializing)]
     pub backing_file: String,
+    pub apipkgid: Option<String>,
 }
 
 impl Derivation {
+    pub fn new(
+        url: &str,
+        name: &str,
+        file_name: &str,
+        extract: bool,
+        extract_target: Option<String>,
+        hash: Option<String>,
+        depends: Vec<String>,
+        tags: Vec<String>,
+        apipkgid: Option<String>,
+    ) -> Self {
+        Self {
+            url: url.to_string(),
+            name: name.to_string(),
+            file_name: file_name.to_string(),
+            extract: extract,
+            extract_target: extract_target,
+            hash: hash,
+            depends: depends,
+            tags: tags,
+            backing_file: String::new(),
+            apipkgid: apipkgid,
+        }
+    }
     pub fn load(path: &PathBuf) -> Result<Self, String> {
         let mut contents = String::new();
         let mut file = File::open(path)
@@ -106,6 +132,7 @@ impl Derivation {
                 vec![]
             },
             backing_file: p.to_string(),
+            apipkgid: derivation.apipkgid,
         }
     }
 

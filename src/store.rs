@@ -6,7 +6,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use crate::package::Derivation;
+use crate::package::{Derivation, Derivations};
 #[derive(Clone)]
 pub struct Store {
     pub store_path: String,
@@ -102,11 +102,11 @@ impl Store {
     /// backup for if the threaded one is being stupid, not actually intended to be used
     pub fn realize_derivation_sequential(
         &self,
-        derivations: Vec<Derivation>,
+        derivations: Derivations,
     ) -> Result<(Vec<StorePath>, Vec<Derivation>), String> {
         let mut realized = Vec::<StorePath>::new();
         let mut new_derivations = Vec::<Derivation>::new();
-        for derivation in derivations {
+        for derivation in derivations.derivations {
             let (store_path, new_derivation) = self.realize_derivation(derivation)?;
             realized.push(store_path);
             new_derivations.push(new_derivation);
