@@ -1,4 +1,11 @@
 // generic API trait for driving metadata fetch
+use std::{
+    collections::HashMap,
+    fmt::{self, Display},
+};
+
+use toml::Table;
+
 use urlencoding;
 #[derive(Debug)]
 pub struct ModResult {
@@ -8,6 +15,24 @@ pub struct ModResult {
     pub author: String,
     pub downloads: usize,
     pub tags: Vec<String>,
+}
+
+impl fmt::Display for ModResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let tags = {
+            let mut string = String::new();
+            for s in &self.tags {
+                string.push(' ');
+                string.push_str(s);
+            }
+            string
+        };
+        write!(
+            f,
+            "{} ({}) by {} - {} downloads\n\t{}\n\ttags: {tags}\n",
+            self.slug, self.id, self.author, self.downloads, self.description
+        )
+    }
 }
 
 // pub struct Mod {
@@ -30,14 +55,16 @@ pub trait APIDriver {
 
     fn search(&self, query: &str) -> Result<Vec<ModResult>, String>;
 
-    fn get_derivations_for(&self, pkg_id: &str) -> Result<Vec<Derivation>, String>;
+    fn get_derivations_for(
+        &self,
+        pkg_id: &str,
+        seen: &mut Vec<(String, Option<String>)>,
+        hash: bool,
+        store: &Store,
+    ) -> Result<Vec<Derivation>, String>;
 }
 
-use std::{collections::HashMap, fmt::Display};
-
-use toml::Table;
-
-use crate::{api_driver::modrinth::ModrinthDriver, package::Derivation};
+use crate::{api_driver::modrinth::ModrinthDriver, package::Derivation, store::Store};
 pub fn get_api_driver(name: &str, cfg: &Table) -> Result<Box<dyn APIDriver>, String> {
     // ADD DRIVERS HERE
     match name {
@@ -98,7 +125,7 @@ impl HTTPSQuery {
 
     pub fn send(&self) -> Result<String, String> {
         let url = self.formulate();
-        println!("URL: {url}");
+        // println!("URL: {url}");
         let response = reqwest::blocking::get(url)
             .map_err(|e| format!("web request failure: {e}"))?
             .text()

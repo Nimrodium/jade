@@ -45,6 +45,25 @@ pub struct ManifestMain {
 }
 
 impl Manifest {
+    pub fn init(
+        name: &str,
+        derives: Option<String>,
+        api: Option<String>,
+        target: Option<String>,
+    ) -> Self {
+        Self {
+            main: ManifestMain {
+                name: name.to_string(),
+                pack_version: "0.1".to_string(),
+                derives,
+                api,
+                enable_all: true,
+                target,
+            },
+            enabled: None,
+            api_cfg: Table::new(),
+        }
+    }
     pub fn load(p: &str) -> Result<Self, String> {
         let mut contents = String::new();
         let mut file = File::open(p).map_err(|e| format!("failed to open manifest `{p}`: {e}"))?;

@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
     fs::{self, File},
+    hash,
     io::{Read, Write},
     path::{Path, PathBuf},
 };
@@ -10,7 +11,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     store::{self, Store, StorePath},
-    util::{self, normalize},
+    util::{self, hash_stream, normalize, verify_hash},
 };
 #[derive(Deserialize)]
 pub struct RawDerivation {
@@ -23,6 +24,7 @@ pub struct RawDerivation {
     depends: Option<Vec<String>>,
     tags: Option<Vec<String>>,
     apipkgid: Option<String>,
+    apiverid: Option<String>,
 }
 fn is_false(b: &bool) -> bool {
     !b
@@ -43,6 +45,7 @@ pub struct Derivation {
     #[serde(skip_serializing)]
     pub backing_file: String,
     pub apipkgid: Option<String>,
+    pub apiverid: Option<String>,
 }
 
 impl Derivation {
@@ -56,18 +59,20 @@ impl Derivation {
         depends: Vec<String>,
         tags: Vec<String>,
         apipkgid: Option<String>,
+        apiverid: Option<String>,
     ) -> Self {
         Self {
             url: url.to_string(),
-            name: name.to_string(),
+            name: normalize(name),
             file_name: file_name.to_string(),
-            extract: extract,
-            extract_target: extract_target,
-            hash: hash,
-            depends: depends,
-            tags: tags,
+            extract,
+            extract_target,
+            hash,
+            depends,
+            tags,
             backing_file: String::new(),
-            apipkgid: apipkgid,
+            apipkgid,
+            apiverid,
         }
     }
     pub fn load(path: &PathBuf) -> Result<Self, String> {
@@ -133,12 +138,18 @@ impl Derivation {
             },
             backing_file: p.to_string(),
             apipkgid: derivation.apipkgid,
+            apiverid: derivation.apiverid,
         }
     }
 
     /// blocking, so should be ran from threads
     /// returns downloaded file path in cache
-    pub fn download(&mut self, tmp: &str) -> Result<String, String> {
+    pub fn download(
+        &mut self,
+        tmp: &str,
+        prehash: Option<String>,
+        hash_format: Option<String>,
+    ) -> Result<String, String> {
         let path = format!("{tmp}/{}", self.file_name);
         println!("downloading {} to {path}", self.url);
         let mut file = fs::File::create(&path)
@@ -150,6 +161,19 @@ impl Derivation {
         let bytes = response
             .bytes()
             .map_err(|e| format!("failed to read downloaded data for {}: `{e}`", self.name))?;
+
+        if let Some(prehash) = prehash {
+            if let Some(hashfmt) = hash_format {
+                let valid = verify_hash(&bytes, &prehash, &hashfmt)?;
+                if !valid {
+                    return Err(format!("api {hashfmt} checksum failed to validate"));
+                }
+            } else {
+                return Err(format!(
+                    "prehash provided but hash format missing {prehash}"
+                ));
+            }
+        }
         self.hash = Some(hash_stream(&bytes));
         file.write_all(&bytes)
             .map_err(|e| format!("failed to write to disk `{path}`: {e}"))?;
@@ -217,10 +241,6 @@ fn hash_file(f: &str) -> Result<String, String> {
         .map_err(|e| format!("failed to read file `{f}` for hashing: {e}"))?;
 
     Ok(hash_stream(&bytes))
-}
-
-fn hash_stream(byte_stream: &[u8]) -> String {
-    nix_base32::to_nix_base32(&Sha256::digest(byte_stream)[..])
 }
 
 // fn extract_zip(p: &str) -> Result<String, String> {}
@@ -299,6 +319,39 @@ impl Derivations {
         } else {
             return Err(format!("{name} could not be found"));
         }
+    }
+    pub fn get_api_pkg_id_list(&self) -> Vec<(String, Option<String>)> {
+        let mut list = Vec::new();
+        for derive in &self.derivations {
+            if let Some(ref pkgid) = derive.apipkgid {
+                list.push((pkgid.clone(), derive.apiverid.clone()));
+            } else {
+                continue;
+            }
+        }
+        list
+    }
+    pub fn find_unmanaged_matches(
+        &mut self,
+        generated_derivation: &Derivation,
+    ) -> Option<(&mut Derivation, bool)> {
+        for derive in &mut self.derivations {
+            let installed = derive.apipkgid.is_some();
+            if let Some(ref hash) = derive.hash {
+                if let Some(ref gen_hash) = generated_derivation.hash {
+                    if hash == gen_hash {
+                        return Some((derive, installed));
+                    }
+                }
+            }
+            if derive.url == generated_derivation.url {
+                return Some((derive, installed));
+            }
+            if derive.name.contains(&generated_derivation.name) {
+                return Some((derive, installed));
+            }
+        }
+        None
     }
 }
 

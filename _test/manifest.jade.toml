@@ -1,0 +1,9 @@
+[main]
+name = "Lumiere"
+pack_version = "0.1"
+enable_all = true
+api="modrinth"
+[modrinth]
+loader="fabric"
+versions=["1.21.5"]
+limit=10

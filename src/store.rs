@@ -36,7 +36,7 @@ impl Store {
         // StorePath::new(&format!("{}/{}", self.store_path))
     }
     /// returns address if present, else None
-    fn is_package_in_store(&self, package: &Derivation) -> Option<StorePath> {
+    pub fn is_package_in_store(&self, package: &Derivation) -> Option<StorePath> {
         if package.hash.is_some() {
             let package_store_path = self.make_package_store_path(&package);
             if package_store_path.exists() {
@@ -57,7 +57,7 @@ impl Store {
             Ok((path, derivation))
         } else {
             let cache_file = {
-                let path = derivation.download(&self.temp)?;
+                let path = derivation.download(&self.temp, None, None)?;
                 if derivation.extract {
                     derivation.extract_package(&path)?
                 } else {

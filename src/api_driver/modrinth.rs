@@ -1,7 +1,11 @@
+use std::io::Write;
+use std::io::stdout;
+
 use crate::api::APIDriver;
 use crate::api::HTTPSQuery;
 use crate::api::ModResult;
 use crate::package::Derivation;
+use crate::store::Store;
 use serde_json;
 use serde_json::Value;
 use toml::Table;
@@ -15,9 +19,9 @@ pub struct ModrinthDriver {
 }
 impl ModrinthDriver {
     pub fn new(cfg: &Table) -> Result<Self, String> {
-        println!("{cfg:?}");
+        // println!("{cfg:?}");
         let cfg = cfg.get("modrinth").unwrap().as_table().unwrap();
-        println!("{cfg:?}");
+        // println!("{cfg:?}");
 
         Ok(Self {
             loader: cfg
@@ -58,25 +62,51 @@ impl ModrinthDriver {
             s
         };
         let facets = format!("[[\"categories:{}\"{}]]", self.loader, versions_str);
-        println!("[MODRINTH_API_DRIVER_DEBUG] facets={facets}");
+        // println!("[MODRINTH_API_DRIVER_DEBUG] facets={facets}");
         facets
     }
 
     fn build_derivation_for(
         &self,
         pkg_id: &str,
-        version_id: Option<&str>,
+        ver_id: Option<&str>,
+        seen: &mut Vec<(String, Option<String>)>,
     ) -> Result<Vec<Derivation>, String> {
+        let mut formulated_derives: Vec<Derivation> = Vec::new();
+        if let Some(seen_pkg) = seen.iter().find(|v| v.0 == pkg_id) {
+            println!("{pkg_id} already installed");
+            if let Some(ver) = ver_id {
+                if let Some(installed_ver) = &seen_pkg.1 {
+                    if ver != installed_ver {
+                        println!(
+                            "warning: version mismatch between {pkg_id}: installed version {ver} but package requested {installed_ver}"
+                        );
+                    }
+                }
+            }
+            return Ok(formulated_derives);
+        }
+        print!(
+            "deriving {pkg_id}{}... ",
+            if let Some(v) = ver_id {
+                format!("/{v}")
+            } else {
+                "".to_string()
+            }
+        );
+        stdout().flush();
         let versions_str = {
             let mut s = String::new();
-            for version in &self.versions {
-                s.push_str(&format!(",\"game_versions:{}\"", version));
+            for (i, version) in self.versions.iter().enumerate() {
+                if i != 0 {
+                    s.push(',');
+                }
+                s.push_str(&format!("\"{}\"", version));
             }
             s
         };
-        let facets = format!("[[\"loader:{}\"{}]]", self.loader, versions_str);
+        // let facets = format!("[[\"loader:{}\"{}]]", self.loader, versions_str);
         let base_package = HTTPSQuery::new(HOSTNAME, &format!("v2/project/{pkg_id}"))
-            .add_parameter("facets", &facets)?
             .send()?
             .parse::<Value>()
             .map_err(|e| format!("could not parse api json response {e}"))?
@@ -103,10 +133,12 @@ impl ModrinthDriver {
                     .map(|s| s.to_string())
             })
             .collect::<Result<Vec<_>, _>>()?;
-
-        let version = if let Some(specific) = version_id {
+        print!("{name} ");
+        stdout().flush();
+        let version = if let Some(specific) = ver_id {
             let url = HTTPSQuery::new(HOSTNAME, &format!("v2/project/{pkg_id}/version/{specific}"))
-                .add_parameter("facets", &facets)?;
+                .add_parameter("loaders", &format!("[\"{}\"]", self.loader))?
+                .add_parameter("game_versions", &format!("[{}]", versions_str))?;
             let response = url
                 .send()?
                 .parse::<Value>()
@@ -118,7 +150,8 @@ impl ModrinthDriver {
                 .to_owned()
         } else {
             let url = HTTPSQuery::new(HOSTNAME, &format!("v2/project/{pkg_id}/version"))
-                .add_parameter("facets", &facets)?;
+                .add_parameter("loaders", &format!("[\"{}\"]", self.loader))?
+                .add_parameter("game_versions", &format!("[{}]", versions_str))?;
             let response = url
                 .send()?
                 .parse::<Value>()
@@ -127,11 +160,22 @@ impl ModrinthDriver {
             // later maybe make this user selected
             response
                 .as_array()
-                .ok_or(format!("api response was not an array"))?[0]
+                .ok_or(format!("api response was not an array"))?
+                .get(0)
+                .ok_or(format!(
+                    "no results for {name} with loader {} and versions {:?}",
+                    self.loader, self.versions
+                ))?
                 .as_object()
                 .ok_or(format!("api response was not an object"))?
                 .to_owned()
         };
+        println!("✓");
+        let version_id = version
+            .get("id")
+            .ok_or(format!("{preamble1} `id`"))?
+            .as_str()
+            .ok_or(format!("{preamble2} `files` but was not a string"))?;
         let files = version
             .get("files")
             .ok_or(format!("{preamble1} `files`"))?
@@ -156,7 +200,7 @@ impl ModrinthDriver {
             .ok_or(format!("{preamble1} `filename`"))?
             .as_str()
             .ok_or(format!("{preamble2} `filename` but was not a string"))?;
-        let hash = Some(nix_base32::to_nix_base32(
+        let hash = Some(
             file.get("hashes")
                 .ok_or(format!("{preamble1} `hashes`"))?
                 .as_object()
@@ -167,14 +211,14 @@ impl ModrinthDriver {
                 .ok_or(format!(
                     "in `hashes` {preamble2} `sha512` but was not a string"
                 ))?
-                .as_bytes(),
-        ));
+                .to_string(),
+        );
         let depend_ids = version
             .get("dependencies")
             .ok_or(format!("{preamble1} `dependencies`"))?
             .as_array()
             .ok_or(format!("{preamble2}"))?;
-        let mut formulated_derives: Vec<Derivation> = Vec::new();
+
         let mut depends: Vec<String> = Vec::new();
         for depend in depend_ids {
             let required = match depend
@@ -196,16 +240,19 @@ impl ModrinthDriver {
                 let version_id = depend
                     .get("version_id")
                     .ok_or(format!("{preamble1} `version_id`"))?
-                    .as_str()
-                    .ok_or(format!("{preamble2} `version_id` but was not a string"))?;
-                let derived = self.build_derivation_for(project_id, Some(version_id))?;
+                    .as_str();
+                // .map(|s| s.to_string());
+                // .ok_or(format!("{preamble2} `version_id` but was not a string"))?;
+                let derived = self.build_derivation_for(project_id, version_id, seen)?;
+
                 for derive in &derived {
                     depends.push(derive.name.clone());
                 }
                 formulated_derives.extend(derived);
             }
         }
-
+        // let hash = hash.map(|h| nix_base32::to_nix_base32(&h.into_bytes()));
+        // println!("HASH: {hash:?}");
         let master_derive = Derivation::new(
             url,
             name,
@@ -216,6 +263,7 @@ impl ModrinthDriver {
             depends,
             categories,
             Some(pkg_id.to_string()),
+            Some(version_id.to_string()),
         );
         formulated_derives.push(master_derive);
         Ok(formulated_derives)
@@ -228,6 +276,7 @@ impl APIDriver for ModrinthDriver {
     // }
 
     fn search(&self, query: &str) -> Result<Vec<crate::api::ModResult>, String> {
+        println!("searching `{query}`...");
         let url = HTTPSQuery::new("api.modrinth.com", "v2/search")
             .add_parameter("query", query)?
             .add_parameter("facets", &self.get_facets())?
@@ -305,8 +354,27 @@ impl APIDriver for ModrinthDriver {
         Ok(mod_results)
     }
 
-    fn get_derivations_for(&self, pkg_id: &str) -> Result<Vec<crate::package::Derivation>, String> {
-        self.build_derivation_for(pkg_id, None)
+    fn get_derivations_for(
+        &self,
+        pkg_id: &str,
+        seen: &mut Vec<(String, Option<String>)>,
+        hash: bool,
+        store: &Store,
+    ) -> Result<Vec<crate::package::Derivation>, String> {
+        let mut derivations = self.build_derivation_for(pkg_id, None, seen)?;
+        if hash {
+            for derive in &mut derivations {
+                let file_path = derive.download(
+                    &store.temp,
+                    derive.hash.clone(),
+                    Some("sha512".to_string()),
+                )?;
+                if store.is_package_in_store(&derive).is_none() {
+                    derive.install_to_store(store, &file_path)?;
+                }
+            }
+        }
+        Ok(derivations)
     }
 }
 
