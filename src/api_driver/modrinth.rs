@@ -118,7 +118,7 @@ impl ModrinthDriver {
             .ok_or(format!("{preamble1} `slug`"))?
             .as_str()
             .ok_or(format!("{preamble2} `slug` but was not a string"))?;
-        let categories = base_package
+        let mut categories = base_package
             .get("categories")
             .ok_or(format!("{preamble1} `categories`"))?
             .as_array()
@@ -134,6 +134,29 @@ impl ModrinthDriver {
             })
             .collect::<Result<Vec<_>, _>>()?;
         print!("{name} ");
+        let side = {
+            let client_side = base_package
+                .get("client_side")
+                .ok_or(format!("{preamble1} `client_side`"))?
+                .as_str()
+                .ok_or(format!("{preamble2} `client_side` but was not a string"))?
+                .to_string();
+            let server_side = base_package
+                .get("server_side")
+                .ok_or(format!("{preamble1} `server_side`"))?
+                .as_str()
+                .ok_or(format!("{preamble2} `server_side` but was not a string"))?
+                .to_string();
+            let client = client_side != "unsupported" || client_side != "unknown";
+            let server = server_side != "unsupported" || server_side != "unknown";
+            match (client, server) {
+                (true, true) => "both".to_string(),
+                (true, false) => "client".to_string(),
+                (false, true) => "server".to_string(),
+                (false, false) => unreachable!(),
+            }
+        };
+        categories.push(side);
         stdout().flush();
         let version = if let Some(specific) = ver_id {
             let url = HTTPSQuery::new(HOSTNAME, &format!("v2/project/{pkg_id}/version/{specific}"))

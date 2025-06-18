@@ -168,9 +168,9 @@ impl StorePath {
         println!("symlinking {artifact} -> {dest}");
         let path = Path::new(&artifact);
         if path.is_dir() {
-            std::os::windows::fs::symlink_dir(artifact, dest).map_err(|e|format!("failed to symlink dir `{artifact}` to `{dest}`: {e} (try passing the --copy flag to copy instead of symlink.)"))?;
+            std::os::windows::fs::symlink_dir(&artifact, dest).map_err(|e|format!("failed to symlink dir `{artifact}` to `{dest}`: {e} (try passing the --copy flag to copy instead of symlink.)"))?;
         } else {
-            std::os::windows::fs::symlink_file(artifact, dest).map_err(|e|format!("failed to symlink dir `{artifact}` to `{dest}`: {e} (try passing the --copy flag to copy instead of symlink.)"))?;
+            std::os::windows::fs::symlink_file(&artifact, dest).map_err(|e|format!("failed to symlink dir `{artifact}` to `{dest}`: {e} (try passing the --copy flag to copy instead of symlink.)"))?;
         }
         Ok(())
     }

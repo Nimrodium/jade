@@ -1,4 +1,5 @@
 // parse packwiz files and collect all their urls and then download
+const VERSION: &str = "1.0";
 use std::{
     collections::HashSet,
     env,
@@ -6,11 +7,12 @@ use std::{
     io::{Write, read_to_string},
     mem,
     path::Path,
-    process,
+    process::{self, exit},
 };
 mod api;
 mod api_driver;
 mod util;
+mod verbose;
 use colorize::AnsiColor;
 use manifest::Manifest;
 use package::{Derivations, load_derivations_from_directory};
@@ -44,6 +46,8 @@ const DERIVES_FALLBACK: &str = "./derives/";
 )]
 
 struct Args {
+    #[arg(long)]
+    cwd: Option<String>,
     #[arg(short, long)]
     verbose: bool,
     #[arg(long)]
@@ -70,6 +74,7 @@ enum Commands {
         #[arg(short, long)]
         manifest: Option<String>,
     },
+    /// test
     Init {
         #[arg(short, long)]
         name: String,
@@ -93,12 +98,16 @@ enum Commands {
         editor: Option<String>,
     },
     Check {},
+    Search {
+        query: String,
+    },
     Install {
         mods: Vec<String>,
     },
     List {
         filter: Option<String>,
     },
+    Version,
 }
 
 // #[cfg(target_os = "windows")]
@@ -162,6 +171,10 @@ fn load_context(dir: &str, args: &Args) -> Result<(Manifest, String), String> {
 }
 // fn get_temp()
 fn entry(args: Args) -> Result<(), String> {
+    if let Some(cwd) = &args.cwd {
+        env::set_current_dir(cwd)
+            .map_err(|e| format!("failed to set current working directory: {e}"))?;
+    }
     let root = if let Some(root) = &args.root {
         root.to_string()
     } else {
@@ -260,7 +273,20 @@ fn entry(args: Args) -> Result<(), String> {
             process::Command::new(editor).arg(&path).output();
         }
         Commands::Check {} => todo!(),
-
+        Commands::Search { ref query } => {
+            let (manifest, derives) = load_context("./", &args)?;
+            let api_name = if let Some(name) = manifest.main.api {
+                name
+            } else {
+                return Err(format!("no api driver specified"));
+            };
+            let driver = api::get_api_driver(&api_name, &manifest.api_cfg)?;
+            let results = driver.search(query)?;
+            println!("{} result(s) for {query}", results.len());
+            for (i, result) in results.iter().enumerate() {
+                println!("{} {result}\n--", format!("{i})").red());
+            }
+        }
         Commands::Install { ref mods } => {
             let (manifest, derives) = load_context("./", &args)?;
             let api_name = if let Some(name) = manifest.main.api {
@@ -299,16 +325,24 @@ fn entry(args: Args) -> Result<(), String> {
                 if results.is_empty() {
                     return Err(format!("no results for {slug}"));
                 }
-                for (i, result) in results.iter().enumerate() {
-                    println!("{} {result}\n--", format!("{i})").red());
+                if results.len() == 1 {
+                    println!("{}", results[0]);
+                    let resp = confirm(&format!("install {}?", results[0].slug), true)?;
+                    if resp {
+                        pkg_ids.push(results[0].id.clone());
+                    }
+                } else {
+                    for (i, result) in results.iter().enumerate() {
+                        println!("{} {result}\n--", format!("{i})").red());
+                    }
+                    let n = select_index(
+                        &format!("({}/{}) select mod result to install", i + 1, mod_set.len(),),
+                        0,
+                        0,
+                        results.len() as isize - 1,
+                    )?;
+                    pkg_ids.push(results[n as usize].id.clone());
                 }
-                let n = select_index(
-                    &format!("({}/{}) select mod result to install", i + 1, mod_set.len(),),
-                    0,
-                    0,
-                    results.len() as isize - 1,
-                )?;
-                pkg_ids.push(results[n as usize].id.clone());
             }
             let mut new_derivations = Vec::new();
             for id in pkg_ids {
@@ -347,91 +381,17 @@ fn entry(args: Args) -> Result<(), String> {
                 println!(
                     "({}/{}) installing derivation for {}",
                     i + 1,
-                    install_derives.len() - 1,
+                    install_derives.len(),
                     derive.name
                 );
                 derive.write_back()?;
             }
-            println!("complete! ")
+            if install_derives.is_empty() {
+                println!("no changes made")
+            } else {
+                println!("complete! ")
+            }
         }
-
-        // Commands::Installg { ref mods } => {
-        //     let (manifest, derives) = load_context("./", &args)?;
-        //     let api_name = if let Some(name) = manifest.main.api {
-        //         name
-        //     } else {
-        //         return Err(format!("no api driver specified"));
-        //     };
-        //     let mut derivations = Derivations::load_derivations_from_directory(&derives)?;
-        //     // let mut mods = mem::take(mods);
-        //     let mut real_mods = HashSet::new();
-
-        //     for mod_name in mods {
-        //         let mut include = true;
-
-        //         for derive in &derivations.derivations {
-        //             if derive.name.contains(&normalize(mod_name)) {
-        //                 if !confirm(
-        //                     &format!(
-        //                         "{mod_name} already installed in tree ({}), reinstall?",
-        //                         derive.backing_file
-        //                     ),
-        //                     false,
-        //                 )? {
-        //                     include = false;
-        //                 }
-        //             }
-        //         }
-        //         if include {
-        //             real_mods.insert(mod_name);
-        //         }
-        //     }
-        //     let driver = api::get_api_driver(&api_name, &manifest.api_cfg)?;
-        //     for pkg in real_mods {
-        //         let results = driver.search(pkg)?;
-        //         for (i, mod_result) in results.iter().enumerate() {
-        //             println!("{i}) {mod_result}");
-        //         }
-        //         let n = util::select_index(
-        //             "Select Mod Index from list",
-        //             0,
-        //             0,
-        //             results.len() as isize - 1,
-        //         )?;
-
-        //         // println!("search results:\n{results:#?}");
-        //         let mut new_derives = driver.get_derivations_for(
-        //             &results[n as usize].id,
-        //             &mut derivations.get_api_pkg_id_list(),
-        //             true,
-        //             &store,
-        //         )?;
-        //         for derive in &mut new_derives {
-        //             if let Some((found, installed)) = derivations.find_unmanaged_matches(&derive) {
-        //                 let prompt = if installed {
-        //                     format!(
-        //                         "\nderivation for `{}` already installed ({}) and managed by {} driver\noverride?",
-        //                         derive.name, found.backing_file, api_name
-        //                     )
-        //                 } else {
-        //                     format!(
-        //                         "\nderivation for `{}` found in tree ({}) but unmanaged by {} driver,\nupdate derivation with api metadata?",
-        //                         derive.name, found.backing_file, api_name
-        //                     )
-        //                 };
-        //                 let resp = confirm(&prompt, true)?;
-        //                 if resp {
-        //                     derive.backing_file = found.backing_file.clone();
-        //                 }
-        //             }
-        //             if derive.backing_file.is_empty() {
-        //                 derive.backing_file = format!("{}/{}.jade.toml", derives, derive.name)
-        //             }
-        //             derive.write_back()?;
-        //         }
-        //         println!("derived:\n{new_derives:#?}")
-        //     }
-        // }
         Commands::List { ref filter } => {
             let (manifest, derives) = load_context("./", &args)?;
             let derivations = Derivations::load_derivations_from_directory(&derives)?;
@@ -450,6 +410,7 @@ fn entry(args: Args) -> Result<(), String> {
                 }
             }
         }
+        Commands::Version => println!("{}", get_version()),
     }
     Ok(())
 }
@@ -457,28 +418,13 @@ fn main() {
     let args = Args::parse();
     // println!("{args:?}");
     // panic!();
+
     match entry(args) {
         Ok(()) => (),
         Err(e) => println!("Error: {e}"),
     };
-    // panic!();
-    // let store = Store::new("/home/kyle/.jade/store", "/home/kyle/.jade/staging");
+}
 
-    // let derivations = dedup(
-    //     load_derivations_from_directory(Path::new("/home/kyle/.jade/vanilla+/derives/")).unwrap(),
-    // );
-
-    // let (paths, derivations) = store.realize_derivations(derivations).unwrap();
-    // for path in paths {
-    //     println!("{path}");
-    //     path.install_to("/home/kyle/.jade/vanilla+-deployed/mods/", true)
-    //         .unwrap();
-    // }
-    // util::update_derives(
-    //     &derivations,
-    //     "/home/kyle/.jade/pack_backups/",
-    //     "/home/kyle/.jade/vanilla+/",
-    //     "vanilla+",
-    // )
-    // .unwrap();
+fn get_version() -> String {
+    format!("version {}-{}", VERSION, current_platform::CURRENT_PLATFORM)
 }
