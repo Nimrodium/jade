@@ -1,8 +1,0 @@
-url = "https://cdn.modrinth.com/data/YL57xq9U/versions/U6evbjd0/iris-fabric-1.8.11%2Bmc1.21.5.jar"
-name = "iris"
-file_name = "iris-fabric-1.8.11+mc1.21.5.jar"
-hash = "0gzr1s3ixv0qx8kpjhwmrl9sj4wbix5r7957mvnmcfs9cgyc2qg9"
-depends = ["sodium"]
-tags = ["decoration", "optimization"]
-apipkgid = "YL57xq9U"
-apiverid = "U6evbjd0"

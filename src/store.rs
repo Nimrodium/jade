@@ -1,152 +1,35 @@
 use std::{
-    fmt::{Debug, Display},
     fs,
-    path::Path,
-    sync::{Arc, mpsc},
-    thread::{self, JoinHandle},
+    path::{Path, PathBuf},
 };
 
-use crate::package::{Derivation, Derivations};
-#[derive(Clone)]
-pub struct Store {
-    pub store_path: String,
-    pub temp: String,
-}
-impl Store {
-    pub fn new(store_path: &str, temp: &str) -> Self {
-        Self {
-            store_path: store_path.to_string(),
-            temp: temp.to_string(),
-        }
-    }
-
-    pub fn make_package_store_path(&self, derivation: &Derivation) -> StorePath {
-        StorePath::new(
-            &format!(
-                "{}/{}",
-                self.store_path,
-                derivation.generate_hash_signature(),
-            ),
-            &derivation.file_name,
-            &derivation.hash.clone().expect(&format!(
-                "cannot build store path for {} without hash",
-                derivation.name
-            )),
-        )
-        // StorePath::new(&format!("{}/{}", self.store_path))
-    }
-    /// returns address if present, else None
-    pub fn is_package_in_store(&self, package: &Derivation) -> Option<StorePath> {
-        if package.hash.is_some() {
-            let package_store_path = self.make_package_store_path(&package);
-            if package_store_path.exists() {
-                Some(package_store_path)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-    pub fn realize_derivation(
-        &self,
-        derivation: Derivation,
-    ) -> Result<(StorePath, Derivation), String> {
-        let mut derivation = derivation.clone();
-        if let Some(path) = self.is_package_in_store(&derivation) {
-            Ok((path, derivation))
-        } else {
-            let cache_file = {
-                let path = derivation.download(&self.temp, None, None)?;
-                if derivation.extract {
-                    derivation.extract_package(&path)?
-                } else {
-                    path
-                }
-            };
-            Ok((derivation.install_to_store(&self, &cache_file)?, derivation))
-        }
-    }
-    /// fetches derivation store paths, executing derivation if not present
-    pub fn realize_derivations(
-        &self,
-        derivations: Vec<Derivation>,
-    ) -> Result<(Vec<StorePath>, Vec<Derivation>), String> {
-        let (sender, receiver) = mpsc::channel();
-        let mut realized = Vec::<StorePath>::new();
-        let mut new_derivations = Vec::<Derivation>::new();
-        // let mut handles: Vec<JoinHandle<()>> = Vec::new();
-        for derivation in derivations {
-            if let Some(store_path) = self.is_package_in_store(&derivation) {
-                println!("package already in store {store_path}");
-                realized.push(store_path);
-                new_derivations.push(derivation);
-                continue;
-            }
-            let cloned_self = self.clone();
-            let cloned_sender = sender.clone();
-            thread::spawn(move || {
-                let result = cloned_self.realize_derivation(derivation);
-                cloned_sender.send(result).unwrap();
-            });
-        }
-        drop(sender);
-
-        for recieved in receiver {
-            let (store_path, new_derivation) = recieved?;
-            realized.push(store_path);
-            new_derivations.push(new_derivation);
-        }
-        Ok((realized, new_derivations))
-    }
-    /// backup for if the threaded one is being stupid, not actually intended to be used
-    pub fn realize_derivation_sequential(
-        &self,
-        derivations: Derivations,
-    ) -> Result<(Vec<StorePath>, Vec<Derivation>), String> {
-        let mut realized = Vec::<StorePath>::new();
-        let mut new_derivations = Vec::<Derivation>::new();
-        for derivation in derivations.derivations {
-            let (store_path, new_derivation) = self.realize_derivation(derivation)?;
-            realized.push(store_path);
-            new_derivations.push(new_derivation);
-        }
-        Ok((realized, new_derivations))
-    }
-}
+use crate::package::{Package, PackageTree};
 
 pub struct StorePath {
-    path: String,
-    name: String,
+    inner: PathBuf,
     hash: String,
-    // invoked_from: Derivation,
+    pkg_name: String,
 }
-
-impl Display for StorePath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.path)
-    }
-}
-impl Debug for StorePath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self}")
-    }
-}
-
 impl StorePath {
-    pub fn new(path: &str, name: &str, hash: &str) -> Self {
-        Self {
-            path: path.to_string(),
-            name: name.to_string(),
-            hash: hash.to_string(),
-        }
+    fn new() {}
+    /// checks if the path exists on disk
+    pub fn exists(&self) -> bool {
+        self.inner.exists()
     }
-    fn exists(&self) -> bool {
-        Path::new(&self.path).exists()
+    /// gets OSPath
+    pub fn get_path(&self) -> &Path {
+        &self.inner
+    }
+    /// deletes from disk
+    pub fn delete(&self) -> Result<(), String> {
+        if self.exists() {
+            fs::remove_dir_all(self.inner).map_err(|e| e.to_string())?;
+        }
     }
     pub fn get_artifact(&self) -> String {
         format!("{}/artifact", self.path)
     }
+    /// copies artifact
     pub fn copy_to(&self, dest: &str) -> Result<(), String> {
         let artifact = self.get_artifact();
         let path = Path::new(&artifact);
@@ -196,14 +79,62 @@ impl StorePath {
         }
     }
 }
-
-fn remove_fs_entity(p: &str) -> Result<(), String> {
-    let path = Path::new(p);
-    if path.is_dir() {
-        fs::remove_dir_all(path)
-    } else {
-        fs::remove_file(path)
-    }
-    .map_err(|e| format!("failed to remove dir/file `{p}`: {e}"))?;
-    Ok(())
+/// file written to root of target describing which files are managed by jade
+pub struct TargetManifest {
+    files: Vec<String>,
 }
+
+pub struct Store {
+    root: String,
+    store: String,
+    lock_file: String,
+}
+impl Store {
+    /// evaluate a package and return a store path
+    pub fn evaluate(package: &Package) -> StorePath {
+        todo!()
+    }
+    fn download(pkg: &Package) -> StorePath {
+        todo!()
+    }
+}
+
+struct GarbageCollector {
+    var: PathBuf,
+}
+impl GarbageCollector {
+    /// cleans dereferenced paths
+    fn clean_deref(&self) -> Result<(), String> {
+        todo!()
+    }
+    fn clean_generations(&self, keep_last_n: usize) -> Result<(), String> {
+        todo!()
+    }
+    fn delete_manifest(&self, manifest: String) -> Result<(), String> {
+        todo!()
+    }
+}
+
+struct VarManifest {
+    manifest: Manifest,
+    lockfile: LockFile,
+}
+
+// ///
+// pub struct LiveTree {
+//     // trees: Vec<String>,
+// }
+// impl LiveTree {
+//     fn get_trees() -> Vec<PackageTree> {
+//         todo!()
+//     }
+//     fn get_live_paths(&self) -> Vec<StorePath> {
+//         todo!()
+//     }
+//     fn get_dead_paths(&self) -> Vec<StorePath> {
+//         todo!()
+//     }
+//     fn collect_garbage(&self) -> Result<(), String> {
+//         todo!()
+//     }
+// }

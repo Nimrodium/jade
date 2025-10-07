@@ -1,7 +1,0 @@
-[[mod]]
-name = "tufx"
-url = "https://github.com/KSPModStewards/TUFX/releases/download/1.1.0/TUFX-1.1.0.zip"
-depends = ['clickthroughblocker', 'toolbarcontroller']
-
-[mod.Zip]
-target = "GameData/TUFX"
