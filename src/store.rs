@@ -1,5 +1,9 @@
+use crate::manifest::LockFile;
+use crate::manifest::Manifest;
+use crate::utils::remove_fs_entity;
+use copy_dir;
 use std::{
-    fs,
+    fmt, fs,
     path::{Path, PathBuf},
 };
 
@@ -10,8 +14,22 @@ pub struct StorePath {
     hash: String,
     pkg_name: String,
 }
+impl fmt::Display for StorePath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.inner)
+    }
+}
 impl StorePath {
-    fn new() {}
+    fn build_path_from_parts(store: &str, hash: &str, pkg_name: &str) -> String {
+        format!("{store}/{hash}-{pkg_name}/")
+    }
+    fn new(store: &str, pkg_name: &str, hash: &str) -> Self {
+        Self {
+            inner: PathBuf::from(Self::build_path_from_parts(store, hash, pkg_name)),
+            hash: hash.to_string(),
+            pkg_name: pkg_name.to_string(),
+        }
+    }
     /// checks if the path exists on disk
     pub fn exists(&self) -> bool {
         self.inner.exists()
@@ -23,11 +41,12 @@ impl StorePath {
     /// deletes from disk
     pub fn delete(&self) -> Result<(), String> {
         if self.exists() {
-            fs::remove_dir_all(self.inner).map_err(|e| e.to_string())?;
+            fs::remove_dir_all(&self.inner).map_err(|e| e.to_string())?;
         }
+        Ok(())
     }
     pub fn get_artifact(&self) -> String {
-        format!("{}/artifact", self.path)
+        format!("{}/artifact", self)
     }
     /// copies artifact
     pub fn copy_to(&self, dest: &str) -> Result<(), String> {
@@ -70,7 +89,7 @@ impl StorePath {
         fs::create_dir_all(dest_dir)
             .map_err(|e| format!("failed to create destination `{dest_dir}`: {e}"))?;
 
-        let dest = format!("{dest_dir}/{}", self.name);
+        let dest = format!("{dest_dir}/{}", self.pkg_name);
         remove_fs_entity(&dest);
         if symlink {
             self.symlink_to(&dest)
@@ -118,6 +137,7 @@ impl GarbageCollector {
 struct VarManifest {
     manifest: Manifest,
     lockfile: LockFile,
+    derived: Vec<StorePath>,
 }
 
 // ///

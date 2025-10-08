@@ -148,7 +148,8 @@ Jade stores runtime and persistant data at:
   * `%APPDATA%\jade\` (Windows),
   * `~/Library/Application Support/` (MacOS)
   * `~/.local/share/jade/` (Linux)
-internally:
+
+internally jade is organized as such:
   * `jade/store`
   > registry of all packages
   * `jade/var`

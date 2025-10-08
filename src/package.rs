@@ -9,15 +9,20 @@ use toml;
  */
 #[derive(Serialize, Deserialize)]
 pub struct Package {
-    formula: Option<String>,
-    url: String,
-    depends: Option<Vec<String>>,
-    tag: Option<Vec<String>>,
+    driver: String,
+    pkg: String,
+    ver: Option<String>,
+    // pkg acts as name.
+    // url:Option<String>,
+
+    // formula overrides
+    input: Option<String>,
+    zip_target: Option<String>,
+    zip_target_dirall: Option<bool>,
+    target: Option<String>,
 }
-impl Package {}
-
-pub struct PackageFormula {}
-impl PackageFormula {}
-
-pub struct PackageTree {}
-impl PackageTree {}
+impl Package {
+    pub fn validate(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
