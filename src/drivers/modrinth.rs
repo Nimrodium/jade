@@ -1,31 +1,28 @@
 use crate::driver::Driver;
 use modrinth_api;
-use sha2::digest::typenum::Mod;
+use serde::{Deserialize, Serialize};
+use toml::Table;
 const DOMAIN: &str = "api.modrinth.com";
+
+#[derive(Serialize, Deserialize)]
+struct Config {
+    mcloader: String,
+    mcver: String,
+}
+
 pub struct ModrinthDriver {
     mcloader: String,
     mcver: String,
 }
 impl ModrinthDriver {
-    fn new(config: &toml::Table) -> Result<Self, String> {
-        let cfg = config
-            .get("modrinth")
-            .ok_or(format!("Modrinth Driver Configuration not defined."))?
-            .as_table()
-            .ok_or(format!("Modrinth Driver Configuration Not TOML Table."))?;
+    pub fn new(config: &Table) -> Result<Self, String> {
+        let cfg: Config = config
+            .clone()
+            .try_into()
+            .map_err(|e| format!("failed to deserialize modrinth config: {e}"))?;
         Ok(Self {
-            mcloader: cfg
-                .get("loader")
-                .ok_or(format!("missing config parameter `loader`"))?
-                .as_str()
-                .ok_or("config parameter `loader` present but not string")?
-                .to_string(),
-            mcver: cfg
-                .get("loader")
-                .ok_or(format!("missing config parameter `loader`"))?
-                .as_str()
-                .ok_or("config parameter `loader` present but not string")?
-                .to_string(),
+            mcloader: cfg.mcloader,
+            mcver: cfg.mcver,
         })
     }
     // fn resolve_url()
@@ -52,6 +49,10 @@ impl Driver for ModrinthDriver {
         result: &crate::driver::DriverResult,
         version: crate::driver::Version,
     ) -> Result<crate::package::Package, String> {
+        todo!()
+    }
+
+    fn derive_package(&self, pkg: &crate::package::Package) -> Result<std::path::PathBuf, String> {
         todo!()
     }
 }

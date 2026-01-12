@@ -1,0 +1,21 @@
+# -- example manifest for jade -- #
+[modrinth]
+mcloader="fabric"
+mcver="1.21.1"
+
+[Default]
+driver="modrinth"
+target="mods/"
+ver="latest"
+
+[[Package]]
+pkg="sodium"
+[[Package]]
+pkg="iris"
+[[Package]]
+pkg="ComplementaryShaders"
+target="shaderpacks/"
+[Package]
+driver="local"
+file="./config/"
+target="config/"

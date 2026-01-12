@@ -6,7 +6,11 @@ use std::{
 
 use toml::Table;
 
-use crate::{drivers, package::Package};
+use crate::{
+    drivers::{self, modrinth::ModrinthDriver},
+    manifest::Manifest,
+    package::Package,
+};
 
 pub trait Driver {
     /// get a list of results for a query
@@ -15,7 +19,10 @@ pub trait Driver {
     // fn resolve(&self, result: &DriverResult) -> Result<String, String>;
     /// download from source and produce a path.
     fn download(&self, result: &DriverResult, version: &str) -> Result<PathBuf, String>;
+    /// generates a [[Package]] entry for the package from the source
     fn build_package(&self, result: &DriverResult, version: Version) -> Result<Package, String>;
+    /// download
+    fn derive_package(&self, pkg: &Package) -> Result<PathBuf, String>;
 }
 pub enum Version {
     Latest,
@@ -27,17 +34,36 @@ pub struct DriverResult {
     author: String,
     downloads: String,
 }
-// pub struct DriverRegistry;
-// impl DriverRegistry {
+pub struct DriverRegistry {
+    manifest: Manifest,
+    modrinth: Option<Box<ModrinthDriver>>,
+}
+impl DriverRegistry {
+    /// fetches a driver instance which implements Driver.
+    /// if `driver_id` is not a valid driver_id None will be returned.
+    fn get_driver(&self, driver_id: &str) -> Option<Box<dyn Driver>> {
+        // let driver: Option<Box<dyn Driver>> = match driver_id {
+        //     // "modrinth" => self.modrinth.as_mut().map(|boxed| boxed as Box<dyn Driver>),
+        //     _ => None,
+        // };
+        let maybe_modrinth: Option<Box<ModrinthDriver>> = Some(Box::new(
+            ModrinthDriver::new(
+                if let Some(c) = &self.manifest.get_driver_config(driver_id) {
+                    c
+                } else {
+                    return None;
+                },
+            )
+            .unwrap(),
+        ));
 
-// }
-
-fn get_driver(driver_id: &str) -> Option<Box<dyn Driver>> {
-    match driver_id {
-        "modrinth" => Some(Box::new(drivers::modrinth::ModrinthDriver)),
-        _ => None,
+        let maybe_driver: Option<Box<dyn Driver>> =
+            maybe_modrinth.map(|boxed| boxed as Box<dyn Driver>);
+        todo!()
     }
 }
+// either keep as a function and pass the manifest each time, but then it regenerates the driver each invokation,
+//  OR make it build the driver when requested.
 
 pub struct HTTPSQuery {
     hostname: String,

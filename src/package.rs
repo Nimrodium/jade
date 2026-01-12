@@ -25,4 +25,14 @@ impl Package {
     pub fn validate(&self) -> Result<(), String> {
         Ok(())
     }
+    pub fn has_tag(&self) -> bool {
+        todo!()
+    }
+    /// adds a tag, returns Err if tag already present (tho it isnt really an error and might make it into an Option)
+    pub fn add_tag(&self, tag: &str) -> Result<(), String> {
+        todo!()
+    }
+    pub fn rm_tag(&self, tag: &str) -> Result<(), String> {
+        todo!()
+    }
 }

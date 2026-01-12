@@ -1,5 +1,4 @@
-use crate::manifest::LockFile;
-use crate::manifest::Manifest;
+use crate::manifest::{LockFile, Manifest};
 use crate::utils::remove_fs_entity;
 use copy_dir;
 use std::{
@@ -7,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::package::{Package, PackageTree};
+use crate::package::Package;
 
 pub struct StorePath {
     inner: PathBuf,
@@ -102,6 +101,7 @@ impl StorePath {
 pub struct TargetManifest {
     files: Vec<String>,
 }
+fn new() {}
 
 pub struct Store {
     root: String,

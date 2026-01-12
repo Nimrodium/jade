@@ -46,15 +46,6 @@ but all options in a formula can be overridden here.
   # url=https://cdn.modrinth.com/data/AANobbMI/versions/1LjoeVdt/sodium-neoforge-0.7.0%2Bmc1.21.8.jar
   ```
 
-`source = "<Driver> '<pkg>' <ver>"`
-pkg can be wrapped in quotes or not. version is optional and latest will be assumed. in the case of file and jademanifest there is no versioning and so only latest is valid.
-eg.
-	* `"modrinth 'sodium' latest"`
-	* `"file ~/.jade/dev/config/"`
-	* `"jademanifest://config"`
-	* `"github Nimrodium/jade latest"`
-
-
 
 ## Package Source Driver
 Any package (mod) source needs to know how to fetch the package from the webserver (or any other source), the default drivers are
